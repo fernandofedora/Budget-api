@@ -115,8 +115,24 @@ app.post('/presupuestos', (req, res) => {
 // Eliminar presupuesto
 app.delete('/presupuestos/:id', (req, res) => {
     const { id } = req.params;
-    db.query('DELETE FROM presupuestos WHERE id = ?', [id], (err) => {
+
+    // Eliminar presupuesto
+    db.query('DELETE FROM presupuestos WHERE id = ?', [id], (err, result) => {
         if (err) return res.status(500).json({ error: err.message });
+
+        // Verificar si la tabla está vacía
+        db.query('SELECT COUNT(*) AS count FROM presupuestos', (err, results) => {
+            if (err) return res.status(500).json({ error: err.message });
+
+            if (results[0].count === 0) {
+                // Si la tabla está vacía, reiniciar AUTO_INCREMENT
+                db.query('ALTER TABLE presupuestos AUTO_INCREMENT = 1', (err) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    console.log('AUTO_INCREMENT reiniciado');
+                });
+            }
+        });
+
         res.json({ message: 'Presupuesto eliminado' });
     });
 });
