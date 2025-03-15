@@ -1,37 +1,23 @@
 require('dotenv').config();
 
 const express = require('express');
-const session = require('express-session');
 const bcrypt = require('bcrypt');
 const mysql = require('mysql2');
 const cors = require('cors');
+const jwt = require('jsonwebtoken'); // Importa jsonwebtoken
 const app = express();
-const FileStore = require('session-file-store')(session);
 
 // Configuración de middleware
 app.use(cors({
     origin: ['http://127.0.0.1:5500', 'http://localhost:3000'],
     credentials: true,
     methods: ['GET', 'POST', 'DELETE', 'PUT'],
-    allowedHeaders: ['Content-Type', 'Authorization'] //esta shit puede que salve el codigo
+    allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Agregar middleware para parsear JSON y formularios
+// Middleware para parsear JSON y formularios
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'supersecretkey',
-  resave: false,
-  saveUninitialized: false,
-  store: new FileStore({ path: './sessions' }), // Guarda sesiones en el disco
-  cookie: {
-      secure: true,
-      httpOnly: false,
-      maxAge: 24 * 60 * 60 * 1000,
-      sameSite: 'lax'
-  }
-}));
 
 // Configuración de MySQL
 const db = mysql.createConnection({
@@ -83,34 +69,51 @@ const createTables = () => {
     });
 };
 
-// Middleware de autenticación
-const requireAuth = (req, res, next) => {
-    if (!req.session.userId) {
-        return res.status(401).json({ error: 'No autenticado' });
+// Middleware para verificar JWT
+const verifyJWT = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ message: 'No autorizado: Token no proporcionado' });
     }
-    next();
+
+    const token = authHeader.split(' ')[1];
+
+    jwt.verify(token, process.env.JWT_SECRET || 'secret', (err, decoded) => {
+        if (err) {
+            return res.status(403).json({ message: 'Token inválido' });
+        }
+        req.userId = decoded.id;
+        next();
+    });
 };
 
 // ================== RUTAS DE AUTENTICACIÓN ================== //
+
 app.post('/api/register', async (req, res) => {
-  console.log('req.body:', req.body);
+    console.log('req.body:', req.body);
     try {
         const { email, password } = req.body;
-        // Validar campos
+
         if (!email || !password) {
             return res.status(400).json({ error: 'Email y contraseña requeridos' });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        // Usar promesas nativas de mysql2
+
         const [result] = await db.promise().execute(
             'INSERT INTO users (email, password) VALUES (?, ?)',
             [email, hashedPassword]
         );
-        req.session.userId = result.insertId;
-        res.status(201).json({ message: 'Usuario registrado' });
+
+        // Generar JWT
+        const token = jwt.sign({ id: result.insertId, email: email }, process.env.JWT_SECRET || 'secret', {
+            expiresIn: '1h' // Expira en 1 hora
+        });
+
+        res.status(201).json({ message: 'Usuario registrado', token: token });
     } catch (error) {
-        console.error('Error en registro:', error); // ← Agregar log
+        console.error('Error en registro:', error);
         if (error.code === 'ER_DUP_ENTRY') {
             return res.status(400).json({ error: 'El usuario ya existe' });
         }
@@ -120,6 +123,7 @@ app.post('/api/register', async (req, res) => {
 
 app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
+
     db.query(
         'SELECT * FROM users WHERE email = ?',
         [email],
@@ -129,46 +133,42 @@ app.post('/api/login', async (req, res) => {
             }
 
             const validPassword = await bcrypt.compare(password, results[0].password);
+
             if (!validPassword) {
                 return res.status(401).json({ error: 'Credenciales inválidas' });
             }
 
-            req.session.userId = results[0].id;
-            console.log('Sesión creada en login:', req.sessionID, req.session.userId);
-            res.json({ message: 'Login exitoso' });
+            // Generar JWT
+            const token = jwt.sign({ id: results[0].id, email: email }, process.env.JWT_SECRET || 'secret', {
+                expiresIn: '1h' // Expira en 1 hora
+            });
+
+            res.json({ message: 'Login exitoso', token: token });
         }
     );
 });
 
-app.post('/api/logout', (req, res) => {
-    req.session.destroy((err) => {
-        if (err) {
-            console.error('Error al destruir la sesión:', err);
-            return res.status(500).json({ error: 'Error interno al cerrar sesión' });
-        }
-
-        // Limpiar la cookie de sesión explícitamente
-        res.clearCookie('connect.sid', {
-            path: '/',
-            httpOnly: true,
-            secure: false,
-            sameSite: 'lax',
-            // secure: process.env.NODE_ENV === 'production'
-        });
-        res.json({ message: 'Sesión cerrada exitosamente' });
-    });
+// Ruta para verificar la autenticación
+app.get('/api/check-auth', verifyJWT, (req, res) => {
+    res.json({ authenticated: true, userId: req.userId });
 });
 
-app.get('/api/check-auth', (req, res) => {
-  console.log('Verificando autenticación:', req.session.userId);
-    req.session.userId ? res.json({ authenticated: true }) : res.status(401).end();
+// Ruta para cerrar sesión
+app.post('/api/logout', (req, res) => {
+    res.json({ message: 'Cierre de sesión exitoso' });
+});
+
+// Ruta de ejemplo protegida
+app.get('/api/protected', verifyJWT, (req, res) => {
+    res.json({ message: 'Ruta protegida', userId: req.userId });
 });
 
 // ================== RUTAS DE PRESUPUESTOS ================== //
-app.get('/presupuestos', requireAuth, (req, res) => {
+
+app.get('/presupuestos', verifyJWT, (req, res) => {
     db.query(
         'SELECT * FROM presupuestos WHERE user_id = ?',
-        [req.session.userId],
+        [req.userId],
         (err, results) => {
             if (err) return res.status(500).json({ error: err.message });
             const presupuestos = results.map(p => ({
@@ -181,12 +181,11 @@ app.get('/presupuestos', requireAuth, (req, res) => {
     );
 });
 
-app.post('/presupuestos', requireAuth, (req, res) => {
+app.post('/presupuestos', verifyJWT, (req, res) => {
     const { nombre, monto } = req.body;
-    const userId = req.session.userId;
     db.query(
         'INSERT INTO presupuestos (user_id, nombre, monto, restante) VALUES (?, ?, ?, ?)',
-        [userId, nombre, monto, monto],
+        [req.userId, nombre, monto, monto],
         (err, result) => {
             if (err) return res.status(500).json({ error: err.message });
             res.status(201).json({
@@ -199,12 +198,11 @@ app.post('/presupuestos', requireAuth, (req, res) => {
     );
 });
 
-app.delete('/presupuestos/:id', requireAuth, (req, res) => {
+app.delete('/presupuestos/:id', verifyJWT, (req, res) => {
     const { id } = req.params;
-    const userId = req.session.userId;
     db.query(
         'DELETE FROM presupuestos WHERE id = ? AND user_id = ?',
-        [id, userId],
+        [id, req.userId],
         (err, result) => {
             if (err) return res.status(500).json({ error: err.message });
             if (result.affectedRows === 0) {
@@ -216,13 +214,13 @@ app.delete('/presupuestos/:id', requireAuth, (req, res) => {
 });
 
 // ================== RUTAS DE GASTOS ================== //
-app.post('/gastos', requireAuth, (req, res) => {
+
+app.post('/gastos', verifyJWT, (req, res) => {
     const { presupuestoId, descripcion, monto } = req.body;
-    const userId = req.session.userId;
     db.query(
         `SELECT p.id FROM presupuestos p
         WHERE p.id = ? AND p.user_id = ?`,
-        [presupuestoId, userId],
+        [presupuestoId, req.userId],
         (err, results) => {
             if (err || results.length === 0) {
                 return res.status(404).json({ error: 'Presupuesto no encontrado' });
@@ -252,14 +250,13 @@ app.post('/gastos', requireAuth, (req, res) => {
     );
 });
 
-app.get('/gastos', requireAuth, (req, res) => {
+app.get('/gastos', verifyJWT, (req, res) => {
     const { presupuestoId } = req.query;
-    const userId = req.session.userId;
     db.query(
         `SELECT g.* FROM gastos g
         INNER JOIN presupuestos p ON g.presupuesto_id = p.id
         WHERE p.user_id = ? AND g.presupuesto_id = ?`,
-        [userId, presupuestoId],
+        [req.userId, presupuestoId],
         (err, results) => {
             if (err) return res.status(500).json({ error: err.message });
             res.json(results);
