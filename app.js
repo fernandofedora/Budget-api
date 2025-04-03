@@ -59,6 +59,8 @@ const createTables = () => {
       monto DECIMAL(10, 2) NOT NULL,
       FOREIGN KEY (presupuesto_id) REFERENCES presupuestos(id) ON DELETE CASCADE
     );
+    ALTER TABLE gastos
+    ADD COLUMN fecha DATE NOT NULL DEFAULT (CURRENT_DATE)
   `;
   db.query(queries, (err) => {
     if (err) throw err;

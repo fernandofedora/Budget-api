@@ -1,11 +1,11 @@
 const db = require('../config/db');
 
 const Gasto = {
-    create: (presupuestoId, descripcion, monto) => {
+    create: (presupuestoId, descripcion, monto, fecha) => {
         return new Promise((resolve, reject) => {
             db.query(
-                'INSERT INTO gastos (presupuesto_id, descripcion, monto) VALUES (?, ?, ?)',
-                [presupuestoId, descripcion, monto],
+                'INSERT INTO gastos (presupuesto_id, descripcion, monto, fecha) VALUES (?, ?, ?, ?)',
+                [presupuestoId, descripcion, monto, fecha],
                 (err, result) => {
                     if (err) return reject(err);
                     db.query(
@@ -17,7 +17,8 @@ const Gasto = {
                                 id: result.insertId,
                                 presupuestoId,
                                 descripcion,
-                                monto
+                                monto,
+                                fecha
                             });
                         }
                     );
