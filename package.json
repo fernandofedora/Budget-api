@@ -4,7 +4,8 @@
   "description": "RESTful API for managing budgets and expenses, designed to be the backend for personal finance or budget control applications",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "node app.js"
   },
   "keywords": [],
   "author": "",

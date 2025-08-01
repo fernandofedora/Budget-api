@@ -8,6 +8,7 @@ const router = express.Router();
 router.post('/', verifyJWT, gastoController.createGasto);
 //router.get('/', verifyJWT, gastoController.getGastos);
 router.get('/', verifyJWT, gastoController.getGastosByPresupuesto); // New route for fetching expenses
+router.put('/:id', verifyJWT, gastoController.updateGasto);
 
 
 module.exports = router;

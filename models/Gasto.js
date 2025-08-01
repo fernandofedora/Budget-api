@@ -15,7 +15,7 @@ const Gasto = {
                             if (err) return reject(err);
                             resolve({
                                 id: result.insertId,
-                                presupuestoId,
+                                presupuesto_id: presupuestoId,
                                 descripcion,
                                 monto,
                                 fecha
@@ -30,11 +30,42 @@ const Gasto = {
     findByPresupuestoId: (presupuestoId) => {
         return new Promise((resolve, reject) => {
             db.query(
-                'SELECT * FROM gastos WHERE presupuesto_id = ?',
+                'SELECT id, presupuesto_id as presupuestoId, descripcion, CAST(monto AS DECIMAL(10,2)) as monto, fecha FROM gastos WHERE presupuesto_id = ?',
                 [presupuestoId],
                 (err, results) => {
                     if (err) return reject(err);
-                    resolve(results);
+                    // Convertir los montos a números
+                    const gastos = results.map(gasto => ({
+                        ...gasto,
+                        monto: parseFloat(gasto.monto)
+                    }));
+                    resolve(gastos);
+                }
+            );
+        });
+    },
+
+    updateById: (id, presupuestoId, descripcion, monto, fecha) => {
+        return new Promise((resolve, reject) => {
+            db.query(
+                'UPDATE gastos SET descripcion = ?, monto = ?, fecha = ? WHERE id = ?',
+                [descripcion, monto, fecha, id],
+                (err, result) => {
+                    if (err) return reject(err);
+                    db.query(
+                        'UPDATE presupuestos SET restante = monto - ? WHERE id = ?',
+                        [monto, presupuestoId],
+                        (err) => {
+                            if (err) return reject(err);
+                            resolve({
+                                id,
+                                presupuestoId,
+                                descripcion,
+                                monto,
+                                fecha
+                            });
+                        }
+                    );
                 }
             );
         });
